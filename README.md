@@ -1,5 +1,7 @@
 # Linuwu Sense
 
+> ** Custom Fork Linuwu Sense for my project **
+
 **Unofficial Linux kernel module for Acer Predator / Nitro gaming laptops** — RGB keyboard backlight, turbo mode, fan control, battery limiter, and more, reverse-engineered from the official PredatorSense app.
 
 The code base is still evolving. It's a bit messy in places, but contributions to structure and organize it further are welcome.
