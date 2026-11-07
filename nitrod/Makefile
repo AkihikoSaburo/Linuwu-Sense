@@ -28,7 +28,7 @@ test:
 
 install:
 	@if [ ! -f "$(BINARY)" ]; then \
-		printf '%s\n' 'error: build/nitrod tidak ditemukan; jalankan make build dulu sebagai user biasa' >&2; \
+		printf '%s\n' 'error: build/nitrod not found; run make build first as a regular user' >&2; \
 		exit 1; \
 	fi
 	install -D -m 0755 "$(BINARY)" "$(DESTDIR)$(BINDIR)/nitrod"

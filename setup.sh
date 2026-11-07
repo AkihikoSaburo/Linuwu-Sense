@@ -128,15 +128,15 @@ RETRY_COMMAND=$(retry_invocation)
 
 if ((EUID == 0)); then
 	if [[ -n "${SUDO_USER:-}" ]]; then
-		fail 'jalankan sebagai user biasa; jangan panggil setup.sh melalui sudo karena build dan signing memerlukan HOME user'
+		fail 'Run as a regular user; do not invoke setup.sh through sudo because building and signing require the user HOME directory'
 	fi
-	fail 'jalankan sebagai user biasa, bukan root'
+	fail 'Run as a regular user, not root'
 fi
 
 if ! command -v sudo >/dev/null 2>&1; then
-	fail "Pre-check gagal: sudo tidak ditemukan. Contoh pemasangan: apt install sudo; pacman -S sudo; dnf install sudo. Setelah tersedia, ulangi: $RETRY_COMMAND"
+	fail "Pre-check failed: sudo not found. Installation examples: apt install sudo; pacman -S sudo; dnf install sudo. Once available, retry: $RETRY_COMMAND"
 fi
-sudo -v || fail "Pre-check gagal: autentikasi sudo gagal. Periksa akses sudo, lalu ulangi: $RETRY_COMMAND"
+sudo -v || fail "Pre-check failed: sudo authentication failed. Check sudo access, then retry: $RETRY_COMMAND"
 
 check_command() {
 	local command_name=$1
@@ -145,7 +145,7 @@ check_command() {
 	local pacman_command=$4
 	local dnf_command=$5
 	if ! command -v "$command_name" >/dev/null 2>&1; then
-		fail "Pre-check gagal: $description tidak ditemukan. Contoh pemasangan: $apt_command (apt), $pacman_command (pacman), atau $dnf_command (dnf). Setelah memasangnya, ulangi: $RETRY_COMMAND"
+		fail "Pre-check failed: $description not found. Installation examples: $apt_command (apt), $pacman_command (pacman), or $dnf_command (dnf). After installing it, retry: $RETRY_COMMAND"
 	fi
 }
 
@@ -158,7 +158,7 @@ check_module_prerequisites() {
 	local kernel_release
 	kernel_release=$(uname -r)
 	if [[ ! -d "/lib/modules/$kernel_release/build" ]]; then
-		fail "Pre-check gagal: header/build directory untuk kernel $kernel_release tidak ditemukan di /lib/modules/$kernel_release/build. Contoh: sudo apt install linux-headers-$kernel_release; sudo pacman -S linux-headers; sudo dnf install kernel-devel-$kernel_release. Setelah memasangnya, ulangi: $RETRY_COMMAND"
+		fail "Pre-check failed: kernel headers/build directory for $kernel_release not found at /lib/modules/$kernel_release/build. Examples: sudo apt install linux-headers-$kernel_release; sudo pacman -S linux-headers; sudo dnf install kernel-devel-$kernel_release. After installing them, retry: $RETRY_COMMAND"
 	fi
 }
 
@@ -171,16 +171,16 @@ check_go_version() {
 	check_command go 'Go' 'sudo apt install golang-go' 'sudo pacman -S go' 'sudo dnf install golang'
 	local required current required_major required_minor current_major current_minor
 	required=$(awk '$1 == "go" { print $2; exit }' "$ROOT_DIR/nitrod/go.mod")
-	[[ -n "$required" ]] || fail "Pre-check gagal: versi Go tidak ditemukan di nitrod/go.mod; ulangi: $RETRY_COMMAND"
-	current=$(go env GOVERSION) || fail "Pre-check gagal membaca versi Go; ulangi: $RETRY_COMMAND"
-	[[ "$required" =~ ^([0-9]+)\.([0-9]+) ]] || fail "Pre-check gagal: format versi go.mod tidak dikenali: $required; ulangi: $RETRY_COMMAND"
+	[[ -n "$required" ]] || fail "Pre-check failed: Go version not found in nitrod/go.mod; retry: $RETRY_COMMAND"
+	current=$(go env GOVERSION) || fail "Pre-check failed: could not read Go version; retry: $RETRY_COMMAND"
+	[[ "$required" =~ ^([0-9]+)\.([0-9]+) ]] || fail "Pre-check failed: unrecognized go.mod version format: $required; retry: $RETRY_COMMAND"
 	required_major=${BASH_REMATCH[1]}
 	required_minor=${BASH_REMATCH[2]}
-	[[ "$current" =~ ^go([0-9]+)\.([0-9]+) ]] || fail "Pre-check gagal: format Go terpasang tidak dikenali: $current; ulangi: $RETRY_COMMAND"
+	[[ "$current" =~ ^go([0-9]+)\.([0-9]+) ]] || fail "Pre-check failed: unrecognized installed Go version format: $current; retry: $RETRY_COMMAND"
 	current_major=${BASH_REMATCH[1]}
 	current_minor=${BASH_REMATCH[2]}
 	if ((current_major < required_major || (current_major == required_major && current_minor < required_minor))); then
-		fail "Pre-check gagal: Go >= $required diperlukan, versi terpasang $current. Contoh: sudo apt install golang-go; sudo pacman -S go; sudo dnf install golang. Setelah upgrade Go, ulangi: $RETRY_COMMAND"
+		fail "Pre-check failed: Go >= $required is required; installed version is $current. Examples: sudo apt install golang-go; sudo pacman -S go; sudo dnf install golang. After upgrading Go, retry: $RETRY_COMMAND"
 	fi
 }
 
@@ -202,16 +202,16 @@ fi
 
 if [[ "$ACTION" == purge && "$YES" -eq 0 ]]; then
 	if [[ ! -t 0 ]]; then
-		fail '--purge memerlukan terminal untuk konfirmasi; gunakan --yes jika penghapusan memang dikehendaki'
+		fail '--purge requires a terminal for confirmation; use --yes to confirm the removal explicitly'
 	fi
-	printf 'Purge akan menghapus konfigurasi/state nitrod dan grup nitrod. Lanjutkan? [y/N] '
+	printf 'Purge will remove nitrod configuration/state and the nitrod group. Continue? [y/N] '
 	if ! read -r answer; then
-		info 'Purge dibatalkan (tidak ada input konfirmasi).'
+		info 'Purge cancelled (no confirmation input).'
 		exit 0
 	fi
 	case "$answer" in
 		y|Y|yes|YES) ;;
-		*) info 'Purge dibatalkan'; exit 0 ;;
+		*) info 'Purge cancelled'; exit 0 ;;
 	esac
 fi
 
@@ -225,7 +225,7 @@ run_step() {
 	else
 		local result=$?
 	fi
-	error "$label gagal (exit $result). Perbaiki masalah lalu ulangi langkah ini: $retry_command"
+	error "$label failed (exit $result). Fix the issue, then retry this step: $retry_command"
 	return "$result"
 }
 
@@ -234,27 +234,27 @@ secure_boot_warning() {
 	local result
 	result=$(mokutil --sb-state 2>/dev/null || true)
 	if grep -Eiq 'secureboot enabled|secure boot enabled' <<<"$result"; then
-		warn 'Secure Boot aktif. DKMS harus menandatangani modul linuwu_sense dan key penandatangan harus sudah di-enroll.'
+		warn 'Secure Boot is enabled. DKMS must sign the linuwu_sense module, and the signing key must be enrolled.'
 	fi
 }
 
 install_module() {
 	secure_boot_warning
-	run_step 'Memasang modul kernel melalui Makefile root' 'make install' make -C "$ROOT_DIR" install || return $?
+	run_step 'Installing kernel module through the root Makefile' 'make install' make -C "$ROOT_DIR" install || return $?
 	local sysfs_base=/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi
 	local attempt
-	info 'Menunggu sysfs nitro_sense/predator_sense, timeout 10 detik'
+	info 'Waiting for nitro_sense/predator_sense sysfs groups (10-second timeout)'
 	for ((attempt = 0; attempt < 10; attempt += 1)); do
 		if [[ -d "$sysfs_base/nitro_sense" || -d "$sysfs_base/predator_sense" ]]; then
-			info 'Driver linuwu_sense siap'
+			info 'linuwu_sense driver is ready'
 			return 0
 		fi
 		sleep 1
 	done
 	if [[ -d "$sysfs_base/nitro_sense" || -d "$sysfs_base/predator_sense" ]]; then return 0; fi
-	error 'Modul terpasang tetapi grup sysfs nitro_sense/predator_sense tidak tersedia setelah 10 detik. Daemon tidak dipasang.'
-	error 'Periksa dmesg, `dkms status`, konflik acer_wmi, Secure Boot, dan enrollment key.'
-	error "Ulangi langkah modul setelah memperbaiki penyebabnya: bash \"$ROOT_DIR/setup.sh\" --module-only"
+	error 'The module is installed, but the nitro_sense/predator_sense sysfs groups did not appear within 10 seconds. The daemon will not be installed.'
+	error 'Check dmesg, `dkms status`, acer_wmi conflicts, Secure Boot, and key enrollment.'
+	error "After fixing the issue, retry the module step: bash \"$ROOT_DIR/setup.sh\" --module-only"
 	return 1
 }
 
@@ -264,10 +264,10 @@ user_has_nitrod_group() {
 
 warn_after_install() {
 	if command -v lsmod >/dev/null 2>&1 && lsmod | awk 'NR > 1 { print $1 }' | grep -Fxq acer_wmi; then
-		warn 'acer_wmi masih termuat; reboot atau regenerate initramfs agar blacklist berlaku.'
+		warn 'acer_wmi is still loaded; reboot or regenerate the initramfs for the blacklist to take effect.'
 	fi
 	if systemctl is-active --quiet power-profiles-daemon.service; then
-		warn 'power-profiles-daemon aktif dan dapat konflik dengan platform_profile; pertimbangkan `sudo systemctl mask power-profiles-daemon` (tidak dijalankan otomatis).'
+		warn 'power-profiles-daemon is active and may conflict with platform_profile; consider `sudo systemctl mask power-profiles-daemon` (not run automatically).'
 	fi
 }
 
@@ -278,17 +278,22 @@ install_daemon() {
 	local make_args=("PREFIX=$PREFIX")
 	if ((NO_ENABLE == 1)); then make_args+=(ENABLE=0); retry_prefix+=" ENABLE=0"; fi
 
-	run_step 'Build daemon (user biasa)' "make -C $ROOT_DIR/nitrod build" make -C "$ROOT_DIR/nitrod" build || return $?
+	run_step 'Build daemon (regular user)' "make -C $ROOT_DIR/nitrod build" make -C "$ROOT_DIR/nitrod" build || return $?
 	if ((SKIP_TESTS == 0)); then
-		run_step 'Tes daemon (go vet dan race)' "make -C $ROOT_DIR/nitrod test" make -C "$ROOT_DIR/nitrod" test || return $?
+		run_step 'Test daemon (go vet and race tests)' "make -C $ROOT_DIR/nitrod test" make -C "$ROOT_DIR/nitrod" test || return $?
 	else
-		warn 'Tes Go dilewati atas permintaan.'
+		warn 'Go tests skipped as requested.'
 	fi
-	run_step 'Pasang daemon' "$retry_prefix" sudo make -C "$ROOT_DIR/nitrod" install "${make_args[@]}" || return $?
+	run_step 'Create the nitrod system group from sysusers configuration' "sudo systemd-sysusers --inline 'g nitrod -'" sudo systemd-sysusers --inline 'g nitrod -' || return $?
+	if ! getent group nitrod >/dev/null 2>&1; then
+		error "The nitrod group is still unavailable after systemd-sysusers. Retry this step: sudo systemd-sysusers --inline 'g nitrod -'"
+		return 1
+	fi
+	run_step 'Install daemon' "$retry_prefix" sudo make -C "$ROOT_DIR/nitrod" install "${make_args[@]}" || return $?
 
 	if ! user_has_nitrod_group; then
-		run_step 'Tambahkan user ke grup nitrod' "sudo usermod -aG nitrod $(id -un)" sudo usermod -aG nitrod "$(id -un)" || return $?
-		warn 'User baru ditambahkan ke grup nitrod; logout/login kembali atau jalankan `newgrp nitrod`.'
+		run_step 'Add the user to the nitrod group' "sudo usermod -aG nitrod $(id -un)" sudo usermod -aG nitrod "$(id -un)" || return $?
+		warn 'The user was added to the nitrod group; log out and back in or run `newgrp nitrod`.'
 	fi
 	warn_after_install
 }
@@ -303,13 +308,13 @@ uninstall_components() {
 			daemon_retry="sudo make -C $ROOT_DIR/nitrod purge PREFIX=$PREFIX"
 		fi
 		if ! sudo make -C "$ROOT_DIR/nitrod" "$daemon_target" "PREFIX=$PREFIX"; then
-			error "Uninstall daemon gagal; tetap melanjutkan ke modul kernel. Ulangi daemon saja dengan: $daemon_retry"
+			error "Daemon uninstall failed; continuing with the kernel module. Retry only the daemon with: $daemon_retry"
 			failed=1
 		fi
 	fi
 	if is_module_scope; then
 		if ! make -C "$ROOT_DIR" uninstall; then
-			error "Uninstall modul kernel gagal. Ulangi modul saja dengan: bash \"$ROOT_DIR/setup.sh\" --module-only --uninstall"
+			error "Kernel module uninstall failed. Retry only the module with: bash \"$ROOT_DIR/setup.sh\" --module-only --uninstall"
 			failed=1
 		fi
 	fi
@@ -318,27 +323,27 @@ uninstall_components() {
 
 case "$ACTION" in
 	install)
-		if is_module_scope; then install_module || fail "Langkah modul gagal. Ulangi: bash \"$ROOT_DIR/setup.sh\" --module-only"; fi
-		if is_daemon_scope; then install_daemon || fail "Langkah daemon gagal. Ulangi daemon build/test/install menggunakan perintah di atas."; fi
-		info 'Instalasi selesai.'
+		if is_module_scope; then install_module || fail "Module step failed. Retry: bash \"$ROOT_DIR/setup.sh\" --module-only"; fi
+		if is_daemon_scope; then install_daemon || fail 'Daemon step failed. Retry daemon build/test/install using the commands above.'; fi
+		info 'Installation complete.'
 		if is_module_scope; then
 			printf '\nVerifikasi modul:\n  dkms status\n  lsmod | grep -E "linuwu|acer_wmi"\n'
 		fi
 		if is_daemon_scope; then
 			cat <<'EOF'
-Verifikasi daemon:
+Daemon verification:
   sudo systemctl status nitrod
   sudo journalctl -u nitrod -n 20
 
-Tes socket (memerlukan socat):
+Socket test (requires socat):
   printf '%s\n' '{"id":1,"cmd":"get_state"}' | socat - UNIX-CONNECT:/run/nitrod.sock
 EOF
 		fi
 		;;
 	uninstall|purge)
 		if ! uninstall_components; then
-			fail 'Satu atau lebih langkah uninstall gagal; lihat perintah pengulangan spesifik di atas.'
+			fail 'One or more uninstall steps failed; see the specific retry commands above.'
 		fi
-		info 'Uninstall selesai.'
+		info 'Uninstall complete.'
 		;;
 esac
