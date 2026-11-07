@@ -1,4 +1,6 @@
 # Build artifacts
+nitrod/build/
+nitrod/nitrod
 *.o
 *.o.cmd
 *.ko

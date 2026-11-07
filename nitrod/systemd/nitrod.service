@@ -1,0 +1,31 @@
+[Unit]
+Description=Acer Nitro hardware control daemon
+After=systemd-modules-load.service
+
+[Service]
+Type=simple
+User=root
+Group=nitrod
+ExecStart=/usr/local/bin/nitrod --socket-group=nitrod
+ExecStopPost=/usr/local/bin/nitrod --restore-fan-auto
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=full
+ProtectKernelTunables=no
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+PrivateTmp=yes
+PrivateDevices=no
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
