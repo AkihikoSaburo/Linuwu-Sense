@@ -33,7 +33,6 @@
  #include <linux/input/sparse-keymap.h>
  #include <acpi/video.h>
  #include <linux/hwmon.h>
- #include <linux/fs.h>
  #include <linux/units.h>
  #include <linux/unaligned.h>
  #include <linux/bitfield.h>
@@ -116,11 +115,6 @@
  #define WMID_GUID4		"7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56"
  #define WMID_GUID5		"79772EC5-04B1-4bfd-843C-61E7F77B6CC9"
  
- /*
-  * Predator State
-  */
- #define STATE_FILE "/etc/predator_state" 
- #define KB_STATE_FILE "/etc/four_zone_kb_state"
  /*
   * Acer ACPI event GUIDs
   */
@@ -1548,11 +1542,11 @@ static struct quirk_entry quirk_acer_nitro = {
  
      args.ebx = 2 << 8;
      args.ebx |= ACER_AMW0_BLUETOOTH_MASK;
- 
-     /*
-      * It's ok to use existing buffer for next wmab_execute call.
-      * But we need to kfree(out.pointer) if next wmab_execute fail.
-      */
+
+     kfree(out.pointer);
+     out.pointer = NULL;
+     out.length = ACPI_ALLOCATE_BUFFER;
+
      status = wmab_execute(&args, &out);
      if (ACPI_FAILURE(status))
          goto out;
@@ -1613,7 +1607,7 @@ static struct quirk_entry quirk_acer_nitro = {
          if (obj->type == ACPI_TYPE_BUFFER &&
              (obj->buffer.length == sizeof(u32) ||
              obj->buffer.length == sizeof(u64))) {
-             tmp = *((u32 *) obj->buffer.pointer);
+             tmp = get_unaligned_le32(obj->buffer.pointer);
          } else if (obj->type == ACPI_TYPE_INTEGER) {
              tmp = (u32) obj->integer.value;
          }
@@ -1925,7 +1919,7 @@ static struct quirk_entry quirk_acer_nitro = {
          if (obj->type == ACPI_TYPE_BUFFER &&
              (obj->buffer.length == sizeof(u32) ||
              obj->buffer.length == sizeof(u64))) {
-             devices = *((u32 *) obj->buffer.pointer);
+             devices = get_unaligned_le32(obj->buffer.pointer);
          } else if (obj->type == ACPI_TYPE_INTEGER) {
              devices = (u32) obj->integer.value;
          } else {
@@ -1980,9 +1974,9 @@ static struct quirk_entry quirk_acer_nitro = {
      if (obj) {
          if (obj->type == ACPI_TYPE_BUFFER) {
              if (obj->buffer.length == sizeof(u32))
-                 tmp = *((u32 *) obj->buffer.pointer);
+                 tmp = get_unaligned_le32(obj->buffer.pointer);
              else if (obj->buffer.length == sizeof(u64))
-                 tmp = *((u64 *) obj->buffer.pointer);
+                 tmp = get_unaligned_le64(obj->buffer.pointer);
          } else if (obj->type == ACPI_TYPE_INTEGER) {
              tmp = (u64) obj->integer.value;
          }
@@ -2017,9 +2011,9 @@ static struct quirk_entry quirk_acer_nitro = {
      if (obj) {
          if (obj->type == ACPI_TYPE_BUFFER) {
              if (obj->buffer.length == sizeof(u32))
-                 tmp = *((u32 *) obj->buffer.pointer);
+                 tmp = get_unaligned_le32(obj->buffer.pointer);
              else if (obj->buffer.length == sizeof(u64))
-                 tmp = *((u64 *) obj->buffer.pointer);
+                 tmp = get_unaligned_le64(obj->buffer.pointer);
          } else if (obj->type == ACPI_TYPE_INTEGER) {
              tmp = (u64) obj->integer.value;
          }
@@ -3568,7 +3562,7 @@ static acpi_status __init
          if (obj->type == ACPI_TYPE_BUFFER &&
              (obj->buffer.length == sizeof(u32) ||
              obj->buffer.length == sizeof(u64))) {
-             devices = *((u32 *) obj->buffer.pointer);
+             devices = get_unaligned_le32(obj->buffer.pointer);
          } else if (obj->type == ACPI_TYPE_INTEGER) {
              devices = (u32) obj->integer.value;
          }
@@ -3600,9 +3594,10 @@ static acpi_status __init
      acpi_status status;
      u64 result;
      u8 val;
-       if (sscanf(buf, "%hhd", &val) != 1)
+
+     if (kstrtou8(buf, 10, &val))
          return -EINVAL;
-       if ((val != 0) && (val != 10) && (val != 20) && (val != 30))
+     if ((val != 0) && (val != 10) && (val != 20) && (val != 30))
          return -EINVAL;
      pr_info("usb charging set value: %d\n",val);
      status = WMI_apgeaction_execute_u64(ACER_WMID_SET_FUNCTION,val == 0 ? 663300 : val == 10 ? 659204 : val == 20 ? 1314564 : val == 30 ? 1969924 : 663300, &result); //if unkown value then turn it off.
@@ -3721,15 +3716,15 @@ static acpi_status __init
          return status;
      
      obj = output.pointer;
- 
-       if (!obj || obj->type != ACPI_TYPE_BUFFER || obj->buffer.length != 4) {
-         pr_err("Unexpected output format getting battery health status, buffer "
-                "length:%d\n",
-                obj->buffer.length);
+
+     if (!obj || obj->type != ACPI_TYPE_BUFFER ||
+         obj->buffer.length < sizeof(struct set_battery_health_control_output)) {
+         pr_err("Unexpected output format setting battery health status, buffer length:%d\n",
+                obj ? obj->buffer.length : 0);
          goto failed;
-       }
-     
-       ret = *((struct set_battery_health_control_output  *)obj->buffer.pointer);
+     }
+
+     ret = *((struct set_battery_health_control_output  *)obj->buffer.pointer);
      
      pr_info("battery_health_set result: uReturn=%d, uReservedOut=%d\n", ret.uReturn, ret.uReservedOut);
      if(ret.uReturn != 0 || ret.uReservedOut != 0){
@@ -3771,23 +3766,21 @@ static acpi_status __init
  static ssize_t predator_battery_limit_store(struct device *dev,
                                              struct device_attribute *attr,
                                              const char *buf, size_t count) {
-     u8 val;
-       if (sscanf(buf, "%hhd", &val) != 1)
+     bool val;
+
+     if (kstrtobool(buf, &val))
          return -EINVAL;
- 
-       if ((val != 0) && (val != 1))
-         return -EINVAL;
-       
-     acpi_status status = battery_health_set(HEALTH_MODE, val);
+
+     acpi_status status = battery_health_set(HEALTH_MODE, val ? 1 : 0);
      if (ACPI_FAILURE(status))
          return -ENODEV;
-     
+
      /* For PH315-52, track the state since hardware query might not reflect changes immediately */
      if (quirks->predator_legacy) {
-         ph315_52_battery_limiter_state = val;
-         pr_info("PH315-52: Battery limiter state set to %d (may take effect after reboot)\n", val);
+         ph315_52_battery_limiter_state = val ? 1 : 0;
+         pr_info("PH315-52: Battery limiter state set to %d (may take effect after reboot)\n", val ? 1 : 0);
      }
-       
+
      return count;
  }
  
@@ -3807,16 +3800,14 @@ static acpi_status __init
  static ssize_t preadtor_battery_calibration_store(struct device *dev,
                                              struct device_attribute *attr,
                                              const char *buf, size_t count) {
-     u8 val;
-       if (sscanf(buf, "%hhd", &val) != 1)
+     bool val;
+
+     if (kstrtobool(buf, &val))
          return -EINVAL;
-       
-     if ((val != 0) && (val != 1))
-         return -EINVAL;
-       
-     if (battery_health_set(CALIBRATION_MODE,val) != AE_OK)
+
+     if (battery_health_set(CALIBRATION_MODE, val ? 1 : 0) != AE_OK)
          return -ENODEV;
-       
+
      return count;
  }
  
@@ -3926,37 +3917,33 @@ static acpi_status __init
                                              struct device_attribute *attr,
                                              const char *buf, size_t count) {
      int t_cpu_fan_speed, t_gpu_fan_speed;
-     
-     char input[9];
+     char input[16];
      char *token;
-     char* input_ptr = input;
-     size_t len = min(count, sizeof(input) - 1);
+     char *input_ptr = input;
+
+     if (!count || count >= sizeof(input))
+         return -EINVAL;
+
      strscpy(input, buf, sizeof(input));
- 
-     if(input[len-1] == '\n'){
-         input[len-1] = '\0';
-     } else {
-         input[len] = '\0';
-     }
- 
- 
+     input_ptr = strim(input);
+
      token = strsep(&input_ptr, ",");
-     if (!token || kstrtoint(token, 10, &t_cpu_fan_speed) || t_cpu_fan_speed < 0 || t_cpu_fan_speed > 100) {
+     if (!token || kstrtoint(strim(token), 10, &t_cpu_fan_speed) || t_cpu_fan_speed < 0 || t_cpu_fan_speed > 100) {
          pr_err("Invalid CPU speed value.\n");
          return -EINVAL;
      }
- 
+
      token = strsep(&input_ptr, ",");
-     if (!token || kstrtoint(token, 10, &t_gpu_fan_speed) || t_gpu_fan_speed < 0 || t_gpu_fan_speed > 100) {
+     if (!token || kstrtoint(strim(token), 10, &t_gpu_fan_speed) || t_gpu_fan_speed < 0 || t_gpu_fan_speed > 100) {
          pr_err("Invalid GPU speed value.\n");
          return -EINVAL;
      }
- 
+
      acpi_status status = acer_set_fan_speed(t_cpu_fan_speed, t_gpu_fan_speed);
      if(ACPI_FAILURE(status)){
          return -ENODEV;
-     } 
- 
+     }
+
      return count;
  }
  /*
@@ -4066,85 +4053,6 @@ static acpi_status __init
      return AE_OK;
  }
  
- static int acer_predator_state_load(void)
- {
-     int on_AC;
-     struct file *file;
-     ssize_t len;
-     acpi_status status;
- 
-     file = filp_open(STATE_FILE, O_RDONLY, 0);
-     if (!IS_ERR(file)) {
- 
-         len = kernel_read(file, (char *)&current_states, sizeof(current_states), &file->f_pos);
-         filp_close(file, NULL);
- 
-         if (len != sizeof(current_states)) {
-             pr_err("Incomplete state read, using defaults\n");
-         } else {
-             pr_info("Thermal states loaded\n");
-         }
-     } else {
-         pr_info("State file not found, loading defaults\n");
-     }
- 
-     /* Always proceed to restore state based on power source */
-     on_AC = acer_is_on_ac_power();
-     if (on_AC < 0) {
-         pr_err("Failed to query power source state\n");
-         return -1;
-     }
- 
-     /* Restore state based on power source (0 for battery, 1 for AC) */
-     status = acer_predator_state_restore(on_AC == 0 ? 0 : 1);
-     if (ACPI_FAILURE(status)) {
-         pr_err("Failed to restore thermal state\n");
-         return -1;
-     }
- 
-     pr_info("Thermal states restored successfully\n");
-     return 0;
- }
- 
- 
- static int acer_predator_state_save(void){
-     int on_AC;
-     acpi_status status;
-     struct file *file;
-     ssize_t len;
- 
-     on_AC = acer_is_on_ac_power();
-     if (on_AC < 0)
-         return -1;
- 
-     /* update to the latest state based on power source */
-     status = acer_predator_state_update(on_AC == 0 ? 0 : 1);
-     if (ACPI_FAILURE(status)){
-         return -1;
-     }
- 
-     file = filp_open(STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-     if(!file) {
-         pr_info("state_access - Error opening file\n");
-         return -1;
-     }
- 
-     len = kernel_write(file, (char *)&current_states, sizeof(current_states), &file->f_pos);
-     if(len < 0) {
-         pr_info("state_access - Error writing to file: %ld\n", len);
-         filp_close(file, NULL);
-     }
- 
-     filp_close(file, NULL);
- 
-     if (len != sizeof(current_states)) {
-         pr_err("Failed to write complete state to file\n");
-         return -1;
-     }
- 
-     pr_info("Thermal states saved successfully\n");
-     return 0;
- }
  
  /*
   *LCD OVERRIDE CONTROLS
@@ -4164,13 +4072,13 @@ static acpi_status __init
  static ssize_t predator_lcd_override_store(struct device *dev, struct device_attribute *attr,const char *buf, size_t count){
      acpi_status status;
      u64 result;
-     u8 val;
-       if (sscanf(buf, "%hhd", &val) != 1)
+     bool val;
+
+     if (kstrtobool(buf, &val))
          return -EINVAL;
-       if ((val != 0) && (val != 1))
-         return -EINVAL;
-     pr_info("lcd_override set value: %d\n",val);
-     status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_PROFILE_METHODID,val == 1 ? 0x1000000000010 : 0x10, &result);
+
+     pr_info("lcd_override set value: %d\n", val ? 1 : 0);
+     status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_PROFILE_METHODID, val ? 0x1000000000010 : 0x10, &result);
      if(ACPI_FAILURE(status)){
          pr_err("Error setting lcd override status: %s\n",acpi_format_exception(status));
          return -ENODEV;
@@ -4206,24 +4114,24 @@ static acpi_status __init
  static ssize_t predator_backlight_timeout_store(struct device *dev, struct device_attribute *attr,const char *buf, size_t count){
      acpi_status status;
      u64 result;
-     u8 val;
-       if (sscanf(buf, "%hhd", &val) != 1)
+     bool val;
+
+     if (kstrtobool(buf, &val))
          return -EINVAL;
-       if ((val != 0) && (val != 1))
-         return -EINVAL;
-     pr_info("backlight_timeout set value: %d\n",val);
-     status = WMI_apgeaction_execute_u64(ACER_WMID_SET_FUNCTION,val == 1 ? 0x1E0000088402 : 0x88402, &result);
+
+     pr_info("backlight_timeout set value: %d\n", val ? 1 : 0);
+     status = WMI_apgeaction_execute_u64(ACER_WMID_SET_FUNCTION, val ? 0x1E0000088402 : 0x88402, &result);
      if(ACPI_FAILURE(status)){
          pr_err("Error setting backlight_timeout status: %s\n",acpi_format_exception(status));
          return -ENODEV;
      }
      pr_info("backlight_timeout set status: %llu\n",result);
-     
+
      /* For PH315-52, track state since return values are non-standard */
      if (quirks->predator_legacy) {
-         ph315_52_backlight_timeout_state = val;
+         ph315_52_backlight_timeout_state = val ? 1 : 0;
      }
-     
+
      return count;
  }
  
@@ -4245,13 +4153,13 @@ static acpi_status __init
  static ssize_t predator_boot_animation_sound_store(struct device *dev, struct device_attribute *attr,const char *buf, size_t count){
      acpi_status status;
      u64 result;
-     u8 val;
-       if (sscanf(buf, "%hhd", &val) != 1)
+     bool val;
+
+     if (kstrtobool(buf, &val))
          return -EINVAL;
-       if ((val != 0) && (val != 1))
-         return -EINVAL;
-     pr_info("boot_animation_sound set value: %d\n",val);
-     status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_MISC_SETTING_METHODID,val == 1 ? 0x106 : 0x6, &result);
+
+     pr_info("boot_animation_sound set value: %d\n", val ? 1 : 0);
+     status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_MISC_SETTING_METHODID, val ? 0x106 : 0x6, &result);
      if(ACPI_FAILURE(status)){
          pr_err("Error setting boot_animation_sound status: %s\n",acpi_format_exception(status));
          return -ENODEV;
@@ -4493,22 +4401,33 @@ static acpi_status __init
          gmInput[8] = 0;
          gmInput[3] = (mode == 0x3) ? 8 : 0;
      }
-
      status = wmi_evaluate_method(WMID_GUID4, 0, ACER_WMID_SET_GAMING_KB_BACKLIGHT_METHODID, &input, &output);
      if (ACPI_FAILURE(status))
          return status;
 
      obj = (union acpi_object *) output.pointer;
 
-     if (obj) {
-         if (obj->type == ACPI_TYPE_BUFFER) {
-             if (obj->buffer.length == sizeof(u32))
-                 resp = *((u32 *) obj->buffer.pointer);
-             else if (obj->buffer.length == sizeof(u64))
-                 resp = *((u64 *) obj->buffer.pointer);
-         } else if (obj->type == ACPI_TYPE_INTEGER) {
-             resp = (u64) obj->integer.value;
+     if (!obj)
+         return AE_ERROR;
+
+     if (obj->type == ACPI_TYPE_BUFFER) {
+         if (obj->buffer.length == sizeof(u32))
+             resp = get_unaligned_le32(obj->buffer.pointer);
+         else if (obj->buffer.length == sizeof(u64))
+             resp = get_unaligned_le64(obj->buffer.pointer);
+         else {
+             pr_warn("Unknown buffer length received for KB backlight: %u\n",
+                     obj->buffer.length);
+             kfree(obj);
+             return AE_ERROR;
          }
+     } else if (obj->type == ACPI_TYPE_INTEGER) {
+         resp = (u64) obj->integer.value;
+     } else {
+         pr_warn("Unknown ACPI object type received for KB backlight: %u\n",
+                 obj->type);
+         kfree(obj);
+         return AE_ERROR;
      }
 
      if(resp != 0){
@@ -4635,63 +4554,60 @@ static acpi_status get_kb_status(struct get_four_zoned_kb_output *out){
  
  static ssize_t four_zoned_rgb_kb_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
      acpi_status status;
- 
+
      int mode, speed, brightness, direction, red, green, blue;
-     char input_buf[30];
+     char input_buf[48];
      char *token;
      char *input_ptr = input_buf;
-     size_t len = min(count, sizeof(input_buf) - 1);
- 
+
+     if (!count || count >= sizeof(input_buf))
+         return -EINVAL;
+
      strscpy(input_buf, buf, sizeof(input_buf));
- 
-     if(input_buf[len-1] == '\n'){
-         input_buf[len-1] = '\0';
-     } else {
-         input_buf[len] = '\0';
-     }
- 
+     input_ptr = strim(input_buf);
+
      token = strsep(&input_ptr, ",");
-     if (!token || kstrtoint(token, 10, &mode) || mode < 0 || mode > 7) {
+     if (!token || kstrtoint(strim(token), 10, &mode) || mode < 0 || mode > 7) {
          pr_err("Invalid mode value.\n");
          return -EINVAL;
      }
- 
+
      token = strsep(&input_ptr, ",");
-     if (!token || kstrtoint(token, 10, &speed) || speed < 0 || speed > 9) {
+     if (!token || kstrtoint(strim(token), 10, &speed) || speed < 0 || speed > 9) {
          pr_err("Invalid speed value.\n");
          return -EINVAL;
      }
- 
+
      token = strsep(&input_ptr, ",");
-     if (!token || kstrtoint(token, 10, &brightness) || brightness < 0 || brightness > 100) {
+     if (!token || kstrtoint(strim(token), 10, &brightness) || brightness < 0 || brightness > 100) {
          pr_err("Invalid brightness value.\n");
          return -EINVAL;
      }
- 
+
      token = strsep(&input_ptr, ",");
-     if (!token || kstrtoint(token, 10, &direction) || ((direction <= 0) && (mode == 0x3 || mode == 0x4 )) || direction < 0 || direction > 2) {
+     if (!token || kstrtoint(strim(token), 10, &direction) || ((direction <= 0) && (mode == 0x3 || mode == 0x4 )) || direction < 0 || direction > 2) {
          pr_err("Invalid direction value.\n");
          return -EINVAL;
      }
- 
+
      token = strsep(&input_ptr, ",");
-     if (!token || kstrtoint(token, 10, &red) || red < 0 || red > 255) {
+     if (!token || kstrtoint(strim(token), 10, &red) || red < 0 || red > 255) {
          pr_err("Invalid red value.\n");
          return -EINVAL;
      }
- 
+
      token = strsep(&input_ptr, ",");
-     if (!token || kstrtoint(token, 10, &green) || green < 0 || green > 255) {
+     if (!token || kstrtoint(strim(token), 10, &green) || green < 0 || green > 255) {
          pr_err("Invalid green value.\n");
          return -EINVAL;
      }
- 
+
      token = strsep(&input_ptr, ",");
-     if (!token || kstrtoint(token, 10, &blue) || blue < 0 || blue > 255) {
+     if (!token || kstrtoint(strim(token), 10, &blue) || blue < 0 || blue > 255) {
          pr_err("Invalid blue value.\n");
          return -EINVAL;
      }
- 
+
      switch (mode) {
          case 0x0:  // Static mode: Ignore speed and direction
              speed = 0;
@@ -4901,40 +4817,47 @@ static acpi_status get_kb_status(struct get_four_zoned_kb_output *out){
  
  static ssize_t per_zoned_rgb_kb_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
      int i = 0;
-     size_t len;
      char *token;
-     char str_buf[34];
+     char str_buf[48];
      struct per_zone_color colors;
+     u64 *zones[4] = { &colors.zone1, &colors.zone2, &colors.zone3, &colors.zone4 };
      char *input_ptr = str_buf;
-     len = min(count, sizeof(str_buf) - 1);
-     strscpy(str_buf, buf, sizeof(str_buf));
-     if(str_buf[len-1] == '\n'){
-         str_buf[len-1] = '\0';
-     } else {
-         str_buf[len] = '\0';
-     }
- 
      acpi_status status;
- 
+
+     if (!count || count >= sizeof(str_buf))
+         return -EINVAL;
+
+     strscpy(str_buf, buf, sizeof(str_buf));
+     input_ptr = strim(str_buf);
+
      /* zone1,zone2,zone3,zone4 */
-     
-     while ((token = strsep(&input_ptr, ",")) && i < 4) {
+     while (i < 4) {
+         token = strsep(&input_ptr, ",");
+         if (!token)
+             return -EINVAL;
+
+         token = strim(token);
          if (strlen(token) != 6) {
              pr_err("Invalid rgb length: %s (%lu) (must be 3 bytes)\n", token, strlen(token));
              return -EINVAL;
          }
-         if (kstrtoull(token, 16, &((u64 *)&colors)[i])) {
+         if (kstrtoull(token, 16, zones[i])) {
              pr_err("Invalid hex value: %s\n", token);
              return -EINVAL;
          }
          i++;
      }
- 
-     if (!token || kstrtoint(token, 10, &colors.brightness) || colors.brightness < 0 || colors.brightness > 100) {
+
+     token = strsep(&input_ptr, ",");
+     if (!token)
+         return -EINVAL;
+
+     token = strim(token);
+     if (kstrtoint(token, 10, &colors.brightness) || colors.brightness < 0 || colors.brightness > 100) {
          pr_err("Invalid brightness value.\n");
          return -EINVAL;
      }
- 
+
      /* set per zone colors */
      status = set_per_zone_color(&colors);
      if(ACPI_FAILURE(status)){
@@ -4944,113 +4867,6 @@ static acpi_status get_kb_status(struct get_four_zoned_kb_output *out){
      return count;
  }
  
- /* BackLight State */
- 
- static int four_zone_kb_state_update(void) {
-     acpi_status status;
-     struct get_four_zoned_kb_output out;
- 
-     // Get keyboard status
-     status = get_kb_status(&out);
-     if (ACPI_FAILURE(status)) {
-         pr_err("get kb status failed!");
-         return -1;
-     }
- 
-     current_kb_state.mode = out.gmOutput[0];
-     current_kb_state.speed = out.gmOutput[1];
-     current_kb_state.brightness = out.gmOutput[2];
-     current_kb_state.direction = out.gmOutput[4]; 
-     current_kb_state.red = out.gmOutput[5];
-     current_kb_state.green = out.gmOutput[6];
-     current_kb_state.blue = out.gmOutput[7];
- 
-     /*
-      * On HID models WMI does not reflect the backlight state and returns
-      * junk, clobbering the cache kept by set_per_zone_color(). The zones
-      * there are already accurate: restored from the state file or set
-      * through sysfs.
-      */
-     if (!(quirks && quirks->nitro_hid_kb)) {
-         status = get_per_zone_color(&current_kb_state.zones);
-         if (ACPI_FAILURE(status)) {
-             pr_err("get_per_zone_color failed!");
-             return -1;
-         }
-     }
-     return 0;
- }
- 
- static int four_zone_kb_state_save(void){
-     struct file *file;
-     ssize_t len;
-     
-     four_zone_kb_state_update();
- 
-     file = filp_open(KB_STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-     if(!file) {
-         pr_err("kb_state_access - Error opening file\n");
-         return -1;
-     }
- 
-     len = kernel_write(file, (char *)&current_kb_state, sizeof(current_kb_state), &file->f_pos);
-     if(len < 0) {
-         pr_err("kb_state_access - Error writing to file: %ld\n", len);
-         filp_close(file, NULL);
-     }
-     
-     filp_close(file, NULL);
- 
-     if (len != sizeof(current_kb_state)) {
-         pr_err("Failed to write complete state to file\n");
-         return -1;
-     }
- 
-     pr_info("kb states saved successfully\n");
-     return 0;
- }
- 
- 
- static int four_zone_kb_state_load(void)
- {
-     struct file *file;
-     ssize_t len;
-     acpi_status status;
- 
-     file = filp_open(KB_STATE_FILE, O_RDONLY, 0);
-     if (!IS_ERR(file)) {
- 
-         len = kernel_read(file, (char *)&current_kb_state, sizeof(current_kb_state), &file->f_pos);
-         filp_close(file, NULL);
- 
-         if (len != sizeof(current_kb_state)) {
-             pr_err("Incomplete state read\n");
-             return -1;
-         } else {
-             pr_info("KB states loaded\n");
-         }
-     } else {
-         pr_info("KB state file not found!\n");
-         return -1;
-     }
- 
-     if(current_kb_state.per_zone){
-         status = set_per_zone_color(&current_kb_state.zones);
-         if(ACPI_FAILURE(status)){
-             pr_err("Error setting RGB KB status.\n");
-             return -1;
-         }
-     } else {
-         status = set_kb_status(current_kb_state.mode,current_kb_state.speed,current_kb_state.brightness,current_kb_state.direction,current_kb_state.red,current_kb_state.green,current_kb_state.blue);
-         if(ACPI_FAILURE(status)){
-             pr_err("Error setting KB status.\n");
-             return -1;
-         }
-     }
- 
-     pr_info("KB states restored successfully\n");
-     return 0;
- }
  
  /* Four Zoned Keyboard Attributes */
  static struct device_attribute four_zoned_rgb_mode = __ATTR(four_zone_mode, 0644, four_zoned_rgb_kb_show, four_zoned_rgb_kb_store);
@@ -5072,19 +4888,19 @@ static acpi_status get_kb_status(struct get_four_zoned_kb_output *out){
  static int acer_platform_probe(struct platform_device *device)
  {
      int err;
- 
+
      if (has_cap(ACER_CAP_MAILLED)) {
          err = acer_led_init(&device->dev);
          if (err)
              goto error_mailled;
      }
- 
+
      if (has_cap(ACER_CAP_BRIGHTNESS)) {
          err = acer_backlight_init(&device->dev);
          if (err)
              goto error_brightness;
      }
- 
+
      err = acer_rfkill_init(&device->dev);
      if (err)
          goto error_rfkill;
@@ -5100,7 +4916,7 @@ static acpi_status get_kb_status(struct get_four_zoned_kb_output *out){
          if (err)
              goto error_platform_profile;
      }
- 
+
      if (has_cap(ACER_CAP_PREDATOR_SENSE)) {
          /* Use legacy attribute group for older Predator models like PH315-52 */
          if (quirks->predator_legacy) {
@@ -5110,39 +4926,57 @@ static acpi_status get_kb_status(struct get_four_zoned_kb_output *out){
          }
          if (err)
              goto error_predator_sense;
-         acer_predator_state_load();
      }
+
      if (has_cap(ACER_CAP_NITRO_SENSE_V4)) {
          err = sysfs_create_group(&device->dev.kobj, &nitro_sense_v4_attr_group);
          if (err)
-             goto error_predator_sense;
-         acer_predator_state_load();
+             goto error_nitro_sense_v4;
      }
+
      if (has_cap(ACER_CAP_NITRO_SENSE)){
          err = sysfs_create_group(&device->dev.kobj, &nitro_sense_attr_group);
          if (err)
              goto error_nitro_sense;
      }
- 
+
      if(quirks->four_zone_kb){
          err = sysfs_create_group(&device->dev.kobj, &four_zoned_kb_attr_group);
          if (err)
              goto error_four_zone;
          if (quirks->kb_zone_arm)
              gaming_kb_arm_zones();
-         four_zone_kb_state_load();
      }
- 
+
      if (has_cap(ACER_CAP_FAN_SPEED_READ)) {
          err = acer_wmi_hwmon_init();
          if (err)
              goto error_hwmon;
      }
- 
+
      return 0;
- 
+
  error_hwmon:
+     if (quirks->four_zone_kb)
+         sysfs_remove_group(&device->dev.kobj, &four_zoned_kb_attr_group);
+ error_four_zone:
+     if (has_cap(ACER_CAP_NITRO_SENSE))
+         sysfs_remove_group(&device->dev.kobj, &nitro_sense_attr_group);
+ error_nitro_sense:
+     if (has_cap(ACER_CAP_NITRO_SENSE_V4))
+         sysfs_remove_group(&device->dev.kobj, &nitro_sense_v4_attr_group);
+ error_nitro_sense_v4:
+     if (has_cap(ACER_CAP_PREDATOR_SENSE)) {
+         if (quirks->predator_legacy)
+             sysfs_remove_group(&device->dev.kobj, &predator_legacy_attr_group);
+         else
+             sysfs_remove_group(&device->dev.kobj, &preadtor_sense_attr_group);
+     }
+ error_predator_sense:
  error_platform_profile:
+     if (has_cap(ACER_CAP_TURBO_LED))
+         sysfs_remove_group(&device->dev.kobj, &turbo_sense_attr_group);
+ error_turbo_sense:
      acer_rfkill_exit();
  error_rfkill:
      if (has_cap(ACER_CAP_BRIGHTNESS))
@@ -5150,14 +4984,6 @@ static acpi_status get_kb_status(struct get_four_zoned_kb_output *out){
  error_brightness:
      if (has_cap(ACER_CAP_MAILLED))
          acer_led_exit();
- error_four_zone:
-     return err;
- error_nitro_sense:
-     return err;
- error_predator_sense:
-     return err;
- error_turbo_sense:
-     return err;
  error_mailled:
      return err;
  }
@@ -5165,12 +4991,15 @@ static acpi_status get_kb_status(struct get_four_zoned_kb_output *out){
  
  static void acer_platform_remove(struct platform_device *device)
  {
-     if (has_cap(ACER_CAP_MAILLED))
-         acer_led_exit();
-     if (has_cap(ACER_CAP_BRIGHTNESS))
-         acer_backlight_exit();
-     if (has_cap(ACER_CAP_TURBO_LED))
-         sysfs_remove_group(&device->dev.kobj, &turbo_sense_attr_group);
+     if (quirks->four_zone_kb)
+         sysfs_remove_group(&device->dev.kobj, &four_zoned_kb_attr_group);
+
+     if (has_cap(ACER_CAP_NITRO_SENSE))
+         sysfs_remove_group(&device->dev.kobj, &nitro_sense_attr_group);
+
+     if (has_cap(ACER_CAP_NITRO_SENSE_V4))
+         sysfs_remove_group(&device->dev.kobj, &nitro_sense_v4_attr_group);
+
      if (has_cap(ACER_CAP_PREDATOR_SENSE)) {
          /* Remove the appropriate attribute group */
          if (quirks->predator_legacy) {
@@ -5178,22 +5007,18 @@ static acpi_status get_kb_status(struct get_four_zoned_kb_output *out){
          } else {
              sysfs_remove_group(&device->dev.kobj, &preadtor_sense_attr_group);
          }
-         acer_predator_state_save();
      }
-     if (has_cap(ACER_CAP_NITRO_SENSE)) {
-        sysfs_remove_group(&device->dev.kobj, &nitro_sense_v4_attr_group);
-        acer_predator_state_save();
-     }
-     if (has_cap(ACER_CAP_NITRO_SENSE_V4)) {
-         sysfs_remove_group(&device->dev.kobj, &nitro_sense_v4_attr_group);
-         acer_predator_state_save();
-     }
-     if(quirks->four_zone_kb){
-         sysfs_remove_group(&device->dev.kobj, &four_zoned_kb_attr_group);
-         four_zone_kb_state_save();
-     }
- 
+
+     if (has_cap(ACER_CAP_TURBO_LED))
+         sysfs_remove_group(&device->dev.kobj, &turbo_sense_attr_group);
+
      acer_rfkill_exit();
+
+     if (has_cap(ACER_CAP_BRIGHTNESS))
+         acer_backlight_exit();
+
+     if (has_cap(ACER_CAP_MAILLED))
+         acer_led_exit();
  }
  
  #ifdef CONFIG_PM_SLEEP

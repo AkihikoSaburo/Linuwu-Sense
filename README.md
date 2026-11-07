@@ -22,13 +22,8 @@ Inspired by [acer-predator-turbo](https://github.com/JafarAkhondali/acer-predato
   - [Fan Speed](#5-fan-speed--️)
   - [LCD Override](#6-lcd-override-️)
   - [USB Charging](#7-usb-charging-)
-  - [Turbo State & OSD Popup](#8-turbo-state-)
 - [Keyboard Configuration](#-keyboard-configuration)
-- [GUI Frontends](#gui)
-- [Troubleshooting](#-troubleshooting)
-- [Roadmap](#-roadmap)
 - [License](#license)
-- [Donations](#-donations)
 
 ## 🚀 Installation
 
@@ -233,25 +228,7 @@ Read-only attribute exposing the current turbo hotkey state, for laptops that us
 cat /sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/turbo_sense/turbo_state
 ```
 
-The driver calls `sysfs_notify()` on this file every time the turbo hotkey is toggled, so userspace can `poll()` on it instead of polling in a loop. This is what powers the **Turbo OSD** popup below.
-
-#### Turbo OSD popup 🟢⚪
-
-`osd/linuwu_turbo_osd.py` is a small GTK3 script that shows a transient grey/green popup at the top of the screen for 3 seconds whenever turbo mode is toggled on or off. It blocks on `turbo_state` rather than polling, so it uses no CPU while idle.
-
-Requirements: `python3-gi` with GTK 3 (`sudo apt install python3-gi gir1.2-gtk-3.0` on Debian/Ubuntu/Mint) — install this *before* `sudo make install` so the popup can start immediately.
-
-On hardware where `turbo_sense` exists (e.g. PH315-53 / PH315-52), `sudo make install` automatically installs `linuwu_turbo_osd.py` to `~/.local/share/linuwu-sense/`, installs the systemd `--user` unit to `~/.config/systemd/user/`, and runs `systemctl --user enable --now linuwu-turbo-osd.service` for you — no manual steps needed.
-
-Check it's running with `systemctl --user status linuwu-turbo-osd.service`. If it shows as enabled but not started, log out and back in (there was no active graphical session at install time) or start it manually:
-```bash
-systemctl --user start linuwu-turbo-osd.service
-```
-
-To try the popup directly without the service:
-```bash
-python3 osd/linuwu_turbo_osd.py
-```
+The driver calls `sysfs_notify()` on this file every time the turbo hotkey is toggled, so userspace can `poll()` on it instead of polling in a loop.
 
 ## 💻 Keyboard Configuration
 
@@ -328,47 +305,6 @@ grep -l ENEK5130 /sys/class/hidraw/*/device/uevent
 
 If that prints a path, keyboard RGB on your machine works through HID feature reports on that hidraw device instead of this module. The protocol and a standalone userspace tool are documented at [kbrgb](https://github.com/shwetankg07/kbrgb) (see its `PROTOCOL.md`). Everything else in Linuwu-Sense (fans, thermal profiles, battery limiter and so on) still works normally on these models, so the two can be used side by side.
 
-
-## GUI
-
-- [Div Acer Manager Max by PXDiv](https://github.com/PXDiv/Div-Acer-Manager-Max)
-- [GUI LinuwuSense by KumarVivek](https://github.com/kumarvivek1752/Linuwu-Sense-GUI/tree/main)
-- [RuSense by r3nv-dev](https://github.com/r3nv-dev/rusense) — Rust TUI + GUI (Tauri)
-
-## 🩺 Troubleshooting
-
-**Turbo/hotkeys stopped working after a reboot, or nothing under `/sys/module/linuwu_sense` exists anymore.**
-This almost always means the kernel was upgraded and the module was never rebuilt for the new kernel. Check what's actually loaded:
-```bash
-uname -r                 # kernel you're running now
-dkms status               # should list linuwu_sense as "installed" for that kernel
-lsmod | grep linuwu_sense
-```
-If `dkms status` doesn't show your current kernel, DKMS wasn't able to rebuild it automatically (e.g. it was installed before this project switched to DKMS, or the rebuild failed). Re-run `sudo make install` from the repo to fix it, then confirm `dkms status` lists your running kernel next time.
-
-**Pressing the turbo key does nothing, and `dmesg` shows nothing either.**
-Confirm the module is actually loaded and receiving the key (`sudo dmesg | grep -i turbo` while pressing the key should print `pressed turbo button - N`). If a press is logged but nothing happens, check `dmesg` for a `linuwu_sense: Failed to ...` error — the driver logs a `pr_err` whenever the underlying WMI call to read or set the turbo LED fails, so a firmware/EC-level failure will now show up there instead of failing silently.
-
-**The Turbo OSD popup never appears.**
-`sudo make install` installs and enables `linuwu-turbo-osd.service` automatically on hardware with `turbo_sense`. Check whether it's actually running:
-```bash
-systemctl --user status linuwu-turbo-osd.service
-```
-If the unit isn't found, either your hardware wasn't detected as turbo-capable at install time, or `python3-gi`/GTK 3 wasn't installed yet (see [Turbo OSD popup](#turbo-osd-popup-)) — re-run `sudo make install` after installing it. If it's enabled but not running, there was no active graphical session at install time; log back in or run `systemctl --user start linuwu-turbo-osd.service`. If it's running but still silent, confirm the sysfs file it watches exists and updates: `cat /sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi/turbo_sense/turbo_state` should flip between `0`/`1` as you press the key.
-
-## 🚧 Roadmap
-
-- [x] GUI for keyboard RGB controls to make it noob-friendly.
-- [x] Module persistence after reboot (via DKMS, surviving kernel upgrades too).
-- [ ] Custom boot logo feature support.
-- [ ] More device support — currently only PHN16-71 is fully supported.
-
 ## License
 
 GNU General Public License v3
-
-## 💖 Donations
-
-Donations are completely optional but show your love for open-source development and motivate me to add more features to this project!
-
-USDT (BEP20 - BNB Smart Chain): `0xDA7aa42B9Fc3041F20f4Ec828A70E9bDD54A6822`
