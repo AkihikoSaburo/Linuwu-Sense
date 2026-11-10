@@ -74,7 +74,7 @@ func (s *Server) Listen() error {
 		return err
 	}
 	s.listener = listener
-	if err := os.Chmod(s.config.Path, 0600); err != nil {
+	if err := os.Chmod(s.config.Path, 0666); err != nil {
 		_ = listener.Close()
 		_ = os.Remove(s.config.Path)
 		return err
