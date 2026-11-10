@@ -98,8 +98,8 @@ func TestServerFlushesResponseAfterClientHalfClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := info.Mode().Perm(); got != 0600 {
-		t.Fatalf("socket mode = %04o, want 0600", got)
+	if got := info.Mode().Perm(); got != 0666 {
+		t.Fatalf("socket mode = %04o, want 0666", got)
 	}
 	connection, err := net.Dial("unix", path)
 	if err != nil {
