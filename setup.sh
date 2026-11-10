@@ -164,7 +164,6 @@ check_module_prerequisites() {
 
 check_systemd() {
 	check_command systemctl 'systemd systemctl' 'sudo apt install systemd' 'sudo pacman -S systemd' 'sudo dnf install systemd'
-	check_command systemd-sysusers 'systemd-sysusers' 'sudo apt install systemd' 'sudo pacman -S systemd' 'sudo dnf install systemd'
 }
 
 check_go_version() {
@@ -204,7 +203,7 @@ if [[ "$ACTION" == purge && "$YES" -eq 0 ]]; then
 	if [[ ! -t 0 ]]; then
 		fail '--purge requires a terminal for confirmation; use --yes to confirm the removal explicitly'
 	fi
-	printf 'Purge will remove nitrod configuration/state and the nitrod group. Continue? [y/N] '
+	printf 'Purge will remove nitrod configuration/state. Continue? [y/N] '
 	if ! read -r answer; then
 		info 'Purge cancelled (no confirmation input).'
 		exit 0
@@ -258,10 +257,6 @@ install_module() {
 	return 1
 }
 
-user_has_nitrod_group() {
-	id -nG "$(id -un)" | tr ' ' '\n' | grep -Fxq nitrod
-}
-
 warn_after_install() {
 	if command -v lsmod >/dev/null 2>&1 && lsmod | awk 'NR > 1 { print $1 }' | grep -Fxq acer_wmi; then
 		warn 'acer_wmi is still loaded; reboot or regenerate the initramfs for the blacklist to take effect.'
@@ -272,8 +267,6 @@ warn_after_install() {
 }
 
 install_daemon() {
-	local had_group=0
-	if user_has_nitrod_group; then had_group=1; fi
 	local retry_prefix="sudo make -C $ROOT_DIR/nitrod install PREFIX=$PREFIX"
 	local make_args=("PREFIX=$PREFIX")
 	if ((NO_ENABLE == 1)); then make_args+=(ENABLE=0); retry_prefix+=" ENABLE=0"; fi
@@ -284,17 +277,7 @@ install_daemon() {
 	else
 		warn 'Go tests skipped as requested.'
 	fi
-	run_step 'Create the nitrod system group from sysusers configuration' "sudo systemd-sysusers --inline 'g nitrod -'" sudo systemd-sysusers --inline 'g nitrod -' || return $?
-	if ! getent group nitrod >/dev/null 2>&1; then
-		error "The nitrod group is still unavailable after systemd-sysusers. Retry this step: sudo systemd-sysusers --inline 'g nitrod -'"
-		return 1
-	fi
 	run_step 'Install daemon' "$retry_prefix" sudo make -C "$ROOT_DIR/nitrod" install "${make_args[@]}" || return $?
-
-	if ! user_has_nitrod_group; then
-		run_step 'Add the user to the nitrod group' "sudo usermod -aG nitrod $(id -un)" sudo usermod -aG nitrod "$(id -un)" || return $?
-		warn 'The user was added to the nitrod group; log out and back in or run `newgrp nitrod`.'
-	fi
 	warn_after_install
 }
 
@@ -326,19 +309,6 @@ case "$ACTION" in
 		if is_module_scope; then install_module || fail "Module step failed. Retry: bash \"$ROOT_DIR/setup.sh\" --module-only"; fi
 		if is_daemon_scope; then install_daemon || fail 'Daemon step failed. Retry daemon build/test/install using the commands above.'; fi
 		info 'Installation complete.'
-		if is_module_scope; then
-			printf '\nVerifikasi modul:\n  dkms status\n  lsmod | grep -E "linuwu|acer_wmi"\n'
-		fi
-		if is_daemon_scope; then
-			cat <<'EOF'
-Daemon verification:
-  sudo systemctl status nitrod
-  sudo journalctl -u nitrod -n 20
-
-Socket test (requires socat):
-  printf '%s\n' '{"id":1,"cmd":"get_state"}' | socat - UNIX-CONNECT:/run/nitrod.sock
-EOF
-		fi
 		;;
 	uninstall|purge)
 		if ! uninstall_components; then

@@ -9,9 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
-	"strconv"
 	"sync"
 )
 
@@ -36,8 +34,7 @@ type Controller interface {
 }
 
 type Config struct {
-	Path  string
-	Group string
+	Path string
 }
 
 type Server struct {
@@ -50,9 +47,6 @@ type Server struct {
 func New(config Config, controller Controller) *Server {
 	if config.Path == "" {
 		config.Path = "/run/nitrod.sock"
-	}
-	if config.Group == "" {
-		config.Group = "nitrod"
 	}
 	return &Server{config: config, controller: controller}
 }
@@ -80,24 +74,7 @@ func (s *Server) Listen() error {
 		return err
 	}
 	s.listener = listener
-	if err := os.Chmod(s.config.Path, 0660); err != nil {
-		_ = listener.Close()
-		_ = os.Remove(s.config.Path)
-		return err
-	}
-	group, err := user.LookupGroup(s.config.Group)
-	if err != nil {
-		_ = listener.Close()
-		_ = os.Remove(s.config.Path)
-		return fmt.Errorf("lookup socket group %q: %w", s.config.Group, err)
-	}
-	groupID, err := strconv.Atoi(group.Gid)
-	if err != nil {
-		_ = listener.Close()
-		_ = os.Remove(s.config.Path)
-		return err
-	}
-	if err := os.Chown(s.config.Path, os.Getuid(), groupID); err != nil {
+	if err := os.Chmod(s.config.Path, 0600); err != nil {
 		_ = listener.Close()
 		_ = os.Remove(s.config.Path)
 		return err

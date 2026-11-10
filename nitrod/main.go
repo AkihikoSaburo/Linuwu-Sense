@@ -27,7 +27,6 @@ func run() error {
 	flags.SetOutput(os.Stderr)
 	restoreAuto := flags.Bool("restore-fan-auto", false, "restore both fans to automatic control and exit")
 	socketPath := flags.String("socket", "/run/nitrod.sock", "UNIX socket path")
-	socketGroup := flags.String("socket-group", "nitrod", "group allowed to access the socket")
 	sysRoot := flags.String("sysfs-root", "/sys", "sysfs root (primarily for tests)")
 	devRoot := flags.String("dev-root", "/dev", "device root (primarily for tests)")
 	fanTemperatureLimit := flags.Float64("fan-temp-limit", 85, "temperature in Celsius that forces manual fans back to auto")
@@ -52,7 +51,7 @@ func run() error {
 		return owner.Shutdown(context.Background())
 	}
 
-	unixServer := server.New(server.Config{Path: *socketPath, Group: *socketGroup}, owner)
+	unixServer := server.New(server.Config{Path: *socketPath}, owner)
 	if err := unixServer.Listen(); err != nil {
 		_ = owner.Shutdown(context.Background())
 		stopOwner()

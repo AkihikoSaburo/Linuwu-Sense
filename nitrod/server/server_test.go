@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,16 +77,8 @@ func (testController) Subscribe(context.Context) (<-chan Event, func(), error) {
 }
 
 func TestServerFlushesResponseAfterClientHalfClose(t *testing.T) {
-	current, err := user.Current()
-	if err != nil {
-		t.Fatal(err)
-	}
-	group, err := user.LookupGroupId(current.Gid)
-	if err != nil {
-		t.Fatal(err)
-	}
 	path := filepath.Join(t.TempDir(), "nitrod.sock")
-	socketServer := New(Config{Path: path, Group: group.Name}, testController{})
+	socketServer := New(Config{Path: path}, testController{})
 	if err := socketServer.Listen(); err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +98,8 @@ func TestServerFlushesResponseAfterClientHalfClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := info.Mode().Perm(); got != 0660 {
-		t.Fatalf("socket mode = %04o, want 0660", got)
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("socket mode = %04o, want 0600", got)
 	}
 	connection, err := net.Dial("unix", path)
 	if err != nil {

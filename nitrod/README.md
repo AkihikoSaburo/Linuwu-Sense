@@ -13,18 +13,16 @@ The only non-standard dependency is `golang.org/x/sys/unix`, used for Linux devi
 
 ## Systemd Example
 
-Install the binary and the provided unit/sysusers files, then create the socket access group and enable the service:
+Install the binary and unit, then enable the service:
 
 ```sh
 sudo install -Dm755 nitrod /usr/local/bin/nitrod
 sudo install -Dm644 systemd/nitrod.service /etc/systemd/system/nitrod.service
-sudo install -Dm644 systemd/nitrod.conf /usr/lib/sysusers.d/nitrod.conf
-sudo systemd-sysusers
 sudo systemctl daemon-reload
 sudo systemctl enable --now nitrod.service
 ```
 
-The service runs as root with primary group `nitrod`; the socket is `/run/nitrod.sock`, mode `0660`. Set `--socket-group` in `ExecStart` if a different group is required. Set `--fan-temp-limit` there to configure the manual-fan temperature fallback (default 85 C). The service's `ExecStopPost` invokes `--restore-fan-auto` to cover crashes and forced termination.
+The service runs as root; the socket is `/run/nitrod.sock`, owned by root with mode `0600`. Only root can connect to the socket, so run client commands through `sudo`. Set `--fan-temp-limit` in `ExecStart` to configure the manual-fan temperature fallback (default 85 C). The service's `ExecStopPost` invokes `--restore-fan-auto` to cover crashes and forced termination.
 
 ## Socket Protocol
 
@@ -43,9 +41,9 @@ Boolean sysfs features take integer `0` or `1`. `platform_profile` takes a strin
 First verify feature discovery with `get_state`. On a supported laptop, test a moderate fan setting, then immediately return to automatic control:
 
 ```sh
-printf '%s\n' '{"id":1,"cmd":"get_state"}' | nc -U /run/nitrod.sock
-printf '%s\n' '{"id":2,"cmd":"set","key":"fan_speed","value":{"cpu":35,"gpu":35}}' | nc -U /run/nitrod.sock
-printf '%s\n' '{"id":3,"cmd":"set","key":"fan_speed","value":{"cpu":0,"gpu":0}}' | nc -U /run/nitrod.sock
+printf '%s\n' '{"id":1,"cmd":"get_state"}' | sudo nc -U /run/nitrod.sock
+printf '%s\n' '{"id":2,"cmd":"set","key":"fan_speed","value":{"cpu":35,"gpu":35}}' | sudo nc -U /run/nitrod.sock
+printf '%s\n' '{"id":3,"cmd":"set","key":"fan_speed","value":{"cpu":0,"gpu":0}}' | sudo nc -U /run/nitrod.sock
 ```
 
 Only test RGB after confirming `per_zone_mode` or `four_zone_mode` is advertised. This daemon does not load/unload the kernel module, persist configuration, handle suspend/resume, or poll platform profiles.

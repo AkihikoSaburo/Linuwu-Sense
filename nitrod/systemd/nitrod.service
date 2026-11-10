@@ -5,8 +5,7 @@ After=systemd-modules-load.service
 [Service]
 Type=simple
 User=root
-Group=nitrod
-ExecStart=/usr/local/bin/nitrod --socket-group=nitrod
+ExecStart=/usr/local/bin/nitrod
 ExecStopPost=/usr/local/bin/nitrod --restore-fan-auto
 Restart=on-failure
 RestartSec=2s

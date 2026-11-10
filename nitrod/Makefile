@@ -2,14 +2,12 @@ PREFIX ?= /usr/local
 DESTDIR ?=
 BINDIR = $(PREFIX)/bin
 UNITDIR ?= /etc/systemd/system
-SYSUSERSDIR ?= /usr/lib/sysusers.d
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || printf 'dev')
 ENABLE ?= 1
 
 BUILD_DIR = build
 BINARY = $(BUILD_DIR)/nitrod
 UNIT_SOURCE = systemd/nitrod.service
-SYSUSERS_SOURCE = packaging/nitrod.sysusers
 
 .DEFAULT_GOAL := help
 .PHONY: build test install uninstall purge clean help
@@ -32,10 +30,8 @@ install:
 		exit 1; \
 	fi
 	install -D -m 0755 "$(BINARY)" "$(DESTDIR)$(BINDIR)/nitrod"
-	install -D -m 0644 "$(SYSUSERS_SOURCE)" "$(DESTDIR)$(SYSUSERSDIR)/nitrod.sysusers"
 	sed 's|/usr/local/bin/nitrod|$(BINDIR)/nitrod|g' "$(UNIT_SOURCE)" | install -D -m 0644 /dev/stdin "$(DESTDIR)$(UNITDIR)/nitrod.service"
 	@if [ -z "$(DESTDIR)" ]; then \
-		systemd-sysusers; \
 		systemctl daemon-reload; \
 		if [ "$(ENABLE)" = "1" ]; then \
 			systemctl enable nitrod.service; \
@@ -53,7 +49,7 @@ uninstall:
 			"$(DESTDIR)$(BINDIR)/nitrod" --restore-fan-auto >/dev/null 2>&1 || true; \
 		fi; \
 	fi
-	@rm -f -- "$(DESTDIR)$(BINDIR)/nitrod" "$(DESTDIR)$(UNITDIR)/nitrod.service" "$(DESTDIR)$(SYSUSERSDIR)/nitrod.sysusers" || true
+	@rm -f -- "$(DESTDIR)$(BINDIR)/nitrod" "$(DESTDIR)$(UNITDIR)/nitrod.service" || true
 	@if [ -z "$(DESTDIR)" ]; then systemctl daemon-reload >/dev/null 2>&1 || true; fi
 
 purge: uninstall
@@ -65,7 +61,6 @@ purge: uninstall
 			*) printf 'refusing unsafe purge path: %s\n' "$$relative_path" >&2; exit 1 ;; \
 		esac; \
 	done; \
-	if [ -z "$(DESTDIR)" ] && getent group nitrod >/dev/null 2>&1; then groupdel nitrod >/dev/null 2>&1 || true; fi
 
 clean:
 	@if [ -z "$(BUILD_DIR)" ] || [ "$(BUILD_DIR)" = "/" ]; then \
@@ -81,6 +76,6 @@ help:
 		'  make test       Run go vet and race-enabled tests' \
 		'  make install    Install an existing build/nitrod' \
 		'  make uninstall  Remove daemon files, keeping config/state/group' \
-		'  make purge      Uninstall and remove config/state/group' \
+		'  make purge      Uninstall and remove config/state' \
 		'  make clean      Remove build artifacts' \
 		'  make help       Show this help (default target)'
